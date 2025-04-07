@@ -331,7 +331,7 @@ def send_initial_email(row):
 
 def send_emails(csv_path):
     try:
-        with open(csv_path, newline='', encoding='cp1252') as csvfile:
+        with open(csv_path, newline='', encoding='utf-8') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 company = row['company']
