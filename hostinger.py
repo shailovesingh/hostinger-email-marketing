@@ -351,7 +351,7 @@ def send_emails(csv_path):
                 ).start()
                 
                 # Delay between sending initial emails
-                time.sleep(10)
+                time.sleep(30)
                 
     except FileNotFoundError:
         print("Error: CSV file not found. Please check the file path.")
