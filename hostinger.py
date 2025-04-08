@@ -131,6 +131,27 @@ SENDER_ACCOUNTS = [
 
 ]
 
+def open_csv_with_fallback(path, encodings=('utf-8', 'cp1252')):
+    """
+    Try opening the file with each encoding in order.
+    Returns an open file object.
+    """
+    last_exc = None
+    for enc in encodings:
+        try:
+            f = open(path, newline='', encoding=enc)
+            # Read a bit to force decoding errors early
+            _ = f.read(1024)
+            f.seek(0)
+            print(f"Opened CSV using encoding: {enc}")
+            return f
+        except UnicodeDecodeError as e:
+            last_exc = e
+            print(f"Failed to decode with {enc}, trying next…")
+    # If all encodings fail, raise the last UnicodeDecodeError
+    raise last_exc
+
+
 def get_random_sender():
     """Randomly selects a sender account from the list."""
     return random.choice(SENDER_ACCOUNTS)
@@ -331,7 +352,8 @@ def send_initial_email(row):
 
 def send_emails(csv_path):
     try:
-        with open(csv_path, newline='', encoding='utf-8') as csvfile:
+        csvfile = open_csv_with_fallback(csv_path)
+        with csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 company = row['company']
