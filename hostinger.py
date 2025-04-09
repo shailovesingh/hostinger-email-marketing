@@ -1,4 +1,5 @@
 import smtplib
+import chardet
 import csv
 import time
 import random
@@ -131,25 +132,44 @@ SENDER_ACCOUNTS = [
 
 ]
 
-def open_csv_with_fallback(path, encodings=('utf-8', 'cp1252')):
+def detect_encoding(path, sample_size=8192):
+    """Use chardet to guess the file encoding from a binary sample."""
+    with open(path, 'rb') as f:
+        raw = f.read(sample_size)
+    result = chardet.detect(raw)
+    enc = result['encoding'] or 'utf-8'
+    print(f"Chardet guessed encoding: {enc} (confidence {result['confidence']:.2f})")
+    return enc
+
+def open_csv_with_fallback(path):
     """
-    Try opening the file with each encoding in order.
+    Try opening with utf-8, then cp1252, then guessed encoding with replace-errors.
     Returns an open file object.
     """
-    last_exc = None
-    for enc in encodings:
-        try:
-            f = open(path, newline='', encoding=enc)
-            # Read a bit to force decoding errors early
-            _ = f.read(1024)
-            f.seek(0)
-            print(f"Opened CSV using encoding: {enc}")
-            return f
-        except UnicodeDecodeError as e:
-            last_exc = e
-            print(f"Failed to decode with {enc}, trying next…")
-    # If all encodings fail, raise the last UnicodeDecodeError
-    raise last_exc
+    # 1) Try UTF-8
+    try:
+        f = open(path, newline='', encoding='utf-8')
+        _ = f.read(1024); f.seek(0)
+        print("Opened CSV with utf-8")
+        return f
+    except UnicodeDecodeError:
+        print("utf-8 failed, trying cp1252…")
+
+    # 2) Try CP1252
+    try:
+        f = open(path, newline='', encoding='cp1252')
+        _ = f.read(1024); f.seek(0)
+        print("Opened CSV with cp1252")
+        return f
+    except UnicodeDecodeError:
+        print("cp1252 failed, falling back to detected encoding with replace-errors…")
+
+    # 3) Guess with chardet and open with replace-errors
+    guessed = detect_encoding(path)
+    f = open(path, newline='', encoding=guessed, errors='replace')
+    print(f"Opened CSV with {guessed} + errors='replace'")
+    return f
+
 
 
 def get_random_sender():
@@ -356,24 +376,21 @@ def send_emails(csv_path):
         with csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
-                company = row['company']
-                person_name = row['name']
-                recipient_email = row['email']
-                print(f"Processing: Company: {company}, Name: {person_name}, Email: {recipient_email}")
+                company = row.get('company', '').strip()
+                person_name = row.get('name', '').strip()
+                recipient_email = row.get('email', '').strip()
+                print(f"Processing: {company} | {person_name} | {recipient_email}")
                 
                 msg_id, subject, sender = send_initial_email(row)
-                if msg_id is None:
+                if not msg_id:
                     continue
                 
-                # Start a thread to schedule follow-ups for this recipient.
                 threading.Thread(
                     target=followup_scheduler,
-                    args=(recipient_email, msg_id, person_name, company,
-                          sender, subject)
+                    args=(recipient_email, msg_id, person_name, company, sender, subject)
                 ).start()
                 
-                # Delay between sending initial emails
-                time.sleep(30)
+                time.sleep(30)  # delay between initial emails
                 
     except FileNotFoundError:
         print("Error: CSV file not found. Please check the file path.")
