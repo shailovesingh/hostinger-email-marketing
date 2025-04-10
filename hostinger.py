@@ -1,5 +1,4 @@
 import smtplib
-import chardet
 import csv
 import time
 import random
@@ -132,66 +131,32 @@ SENDER_ACCOUNTS = [
 
 ]
 
-def detect_encoding(path, sample_size=8192):
-    """Use chardet to guess the file encoding from a binary sample."""
-    with open(path, 'rb') as f:
-        raw = f.read(sample_size)
-    result = chardet.detect(raw)
-    enc = result['encoding'] or 'utf-8'
-    print(f"Chardet guessed encoding: {enc} (confidence {result['confidence']:.2f})")
-    return enc
-
-def open_csv_with_fallback(path):
+def open_csv_with_fallback(path, encodings=('utf-8', 'cp1252')):
     """
-    Try opening with utf-8, then cp1252, then guessed encoding with replace-errors.
+    Try opening the file with each encoding in order.
     Returns an open file object.
     """
-    # 1) Try UTF-8
-    try:
-        f = open(path, newline='', encoding='utf-8')
-        _ = f.read(1024); f.seek(0)
-        print("Opened CSV with utf-8")
-        return f
-    except UnicodeDecodeError:
-        print("utf-8 failed, trying cp1252…")
-
-    # 2) Try CP1252
-    try:
-        f = open(path, newline='', encoding='cp1252')
-        _ = f.read(1024); f.seek(0)
-        print("Opened CSV with cp1252")
-        return f
-    except UnicodeDecodeError:
-        print("cp1252 failed, falling back to detected encoding with replace-errors…")
-
-    # 3) Guess with chardet and open with replace-errors
-    guessed = detect_encoding(path)
-    f = open(path, newline='', encoding=guessed, errors='replace')
-    print(f"Opened CSV with {guessed} + errors='replace'")
-    return f
-
-
+    last_exc = None
+    for enc in encodings:
+        try:
+            f = open(path, newline='', encoding=enc)
+            # Read a bit to force decoding errors early
+            _ = f.read(1024)
+            f.seek(0)
+            print(f"Opened CSV using encoding: {enc}")
+            return f
+        except UnicodeDecodeError as e:
+            last_exc = e
+            print(f"Failed to decode with {enc}, trying next…")
+    # If all encodings fail, raise the last UnicodeDecodeError
+    raise last_exc
 
 def get_random_sender():
     """Randomly selects a sender account from the list."""
     return random.choice(SENDER_ACCOUNTS)
 
 def spin_email_template(person_name, company, is_followup=False, followup_number=None):
-    """
-    Creates both a plain text and an HTML email body.
-    The email includes:
-      - A greeting  
-      - sentence1_options  
-      - sentence2_options  
-      - sentence3_options  
-      - A Loom GIF thumbnail (or link for plain text)  
-      - "Looking forward to hearing from you"  
-      - "Best regards"  
-      - "Your Company"
-      
-    If it's a follow-up, an extra line is appended indicating follow-up number.
-    """
-    # Randomize greeting and sentences
+    # ... (copy your spin_email_template function exactly) ...
     greetings = [
         f"Hi {person_name},",
         f"Hello {person_name},",
@@ -218,10 +183,9 @@ def spin_email_template(person_name, company, is_followup=False, followup_number
     sentence2 = random.choice(sentence2_options)
     sentence3 = random.choice(sentence3_options)
     
-    # Extra line for follow-ups
-    extra_line = f"\nThis is follow-up #{followup_number}. Just checking in regarding my previous email." if is_followup and followup_number else ""
+    extra_line = f"\nThis is follow-up #{followup_number}. Just checking in regarding my previous email." \
+                 if is_followup and followup_number else ""
     
-    # Plain text version: Loom GIF cannot be embedded so include the link instead.
     loom_link = "https://www.loom.com/share/1915f664b7f145f193d7b0fd6873ecb1"
     text_body = f"""{greeting}
 
@@ -241,8 +205,6 @@ Best regards,
 Neal  
 https://filldesigngroup.in/
 """
-    
-    # HTML version: Embed the Loom GIF thumbnail.
     html_body = f"""\
 <html>
   <body>
@@ -268,29 +230,19 @@ https://filldesigngroup.in/
     return text_body, html_body
 
 def choose_subject(company):
-    """
-    Randomly selects and personalizes a subject line with the company name.
-    """
     subject_templates = [
         "Question for {Company}",
         "See this for {Company}",
         "Quick Question for {Company}"
     ]
-    template = random.choice(subject_templates)
-    return template.format(Company=company)
+    return random.choice(subject_templates).format(Company=company)
 
 def check_reply(recipient_email):
-    """
-    Placeholder for reply checking.
-    In production, integrate with IMAP or a CRM to detect a reply.
-    """
+    # Placeholder for reply checking
     return False
 
 def send_followup(recipient_email, original_msg_id, person_name, company, followup_number,
                   sender, original_subject):
-    """
-    Sends a follow-up email in the same thread.
-    """
     msg = MIMEMultipart('alternative')
     msg['From'] = sender['email']
     msg['To'] = recipient_email
@@ -298,11 +250,9 @@ def send_followup(recipient_email, original_msg_id, person_name, company, follow
     msg['In-Reply-To'] = original_msg_id
     msg['References'] = original_msg_id
     
-    text_body, html_body = spin_email_template(person_name, company, is_followup=True, followup_number=followup_number)
-    part1 = MIMEText(text_body, 'plain')
-    part2 = MIMEText(html_body, 'html')
-    msg.attach(part1)
-    msg.attach(part2)
+    text_body, html_body = spin_email_template(person_name, company, True, followup_number)
+    msg.attach(MIMEText(text_body, 'plain'))
+    msg.attach(MIMEText(html_body, 'html'))
     
     try:
         with smtplib.SMTP_SSL(sender['smtp_server'], sender['smtp_port'], timeout=10) as server:
@@ -310,19 +260,14 @@ def send_followup(recipient_email, original_msg_id, person_name, company, follow
             server.sendmail(sender['email'], recipient_email, msg.as_string())
             print(f"Follow-up #{followup_number} sent to {recipient_email} from {sender['email']}")
     except Exception as e:
-        print(f"Error sending follow-up #{followup_number} to {recipient_email} from {sender['email']}: {e}")
+        print(f"Error sending follow-up #{followup_number} to {recipient_email}: {e}")
 
 def followup_scheduler(recipient_email, original_msg_id, person_name, company,
                        sender, original_subject):
-    """
-    Waits for followup_delay seconds then sends follow-ups if no reply is detected.
-    First follow-up after followup_delay seconds, second follow-up after another followup_delay.
-    """
     print(f"Waiting {followup_delay} seconds for follow-up #1 for {recipient_email}")
     time.sleep(followup_delay)
     if not check_reply(recipient_email):
-        send_followup(recipient_email, original_msg_id, person_name, company, 1,
-                      sender, original_subject)
+        send_followup(recipient_email, original_msg_id, person_name, company, 1, sender, original_subject)
     else:
         print(f"Reply received from {recipient_email}. No first follow-up sent.")
         return
@@ -330,35 +275,27 @@ def followup_scheduler(recipient_email, original_msg_id, person_name, company,
     print(f"Waiting {followup_delay} seconds for follow-up #2 for {recipient_email}")
     time.sleep(followup_delay)
     if not check_reply(recipient_email):
-        send_followup(recipient_email, original_msg_id, person_name, company, 2,
-                      sender, original_subject)
+        send_followup(recipient_email, original_msg_id, person_name, company, 2, sender, original_subject)
     else:
         print(f"Reply received from {recipient_email}. No second follow-up sent.")
 
 def send_initial_email(row):
-    """
-    Sends the initial email and returns the Message-ID and subject.
-    A random sender is chosen from SENDER_ACCOUNTS.
-    """
     company = row['company']
     person_name = row['name']
     recipient_email = row['email']
     subject = choose_subject(company)
     text_body, html_body = spin_email_template(person_name, company)
     
-    # Choose a random sender for this email
     sender = get_random_sender()
-    
     msg = MIMEMultipart('alternative')
     msg['From'] = sender['email']
     msg['To'] = recipient_email
     msg['Subject'] = subject
     msg_id = email.utils.make_msgid()
     msg['Message-ID'] = msg_id
-    part1 = MIMEText(text_body, 'plain')
-    part2 = MIMEText(html_body, 'html')
-    msg.attach(part1)
-    msg.attach(part2)
+    
+    msg.attach(MIMEText(text_body, 'plain'))
+    msg.attach(MIMEText(html_body, 'html'))
     
     try:
         with smtplib.SMTP_SSL(sender['smtp_server'], sender['smtp_port'], timeout=10) as server:
@@ -366,7 +303,7 @@ def send_initial_email(row):
             server.sendmail(sender['email'], recipient_email, msg.as_string())
             print(f"Initial email sent to {recipient_email} from {sender['email']}")
     except Exception as e:
-        print(f"Error sending initial email to {recipient_email} from {sender['email']}: {e}")
+        print(f"Error sending initial email to {recipient_email}: {e}")
         return None, None, None
     return msg_id, subject, sender
 
@@ -376,10 +313,10 @@ def send_emails(csv_path):
         with csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
-                company = row.get('company', '').strip()
-                person_name = row.get('name', '').strip()
-                recipient_email = row.get('email', '').strip()
-                print(f"Processing: {company} | {person_name} | {recipient_email}")
+                company = row['company']
+                person_name = row['name']
+                recipient_email = row['email']
+                print(f"Processing: Company: {company}, Name: {person_name}, Email: {recipient_email}")
                 
                 msg_id, subject, sender = send_initial_email(row)
                 if not msg_id:
@@ -397,7 +334,6 @@ def send_emails(csv_path):
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
 
-# Path to your CSV file with headers: company, name, email
-csv_path = "test Email.csv"
-
-send_emails(csv_path)
+if __name__ == "__main__":
+    csv_path = "test Email.xlsx"
+    send_emails(csv_path)
